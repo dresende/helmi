@@ -267,8 +267,16 @@
     background: linear-gradient(120deg, var(--rose), var(--peri) 55%, var(--glass));
     -webkit-background-clip: text; background-clip: text; color: transparent;
   }
-  .secret p { color: var(--ink-faint); font-size: .82rem; margin-top: 6px;
-              max-width: none; letter-spacing: .14em; }
+  /* The same pearl construction as the wordmark's dot: nacre under a
+     highlight, lit from the upper left. */
+  .secret .bead {
+    display: block; width: 13px; height: 13px; border-radius: 50%;
+    margin: 0 auto 14px;
+    background:
+      radial-gradient(circle at 33% 28%, rgba(255,255,255,.92), rgba(255,255,255,0) 55%),
+      linear-gradient(135deg, var(--rose), var(--peri), var(--glass));
+    box-shadow: 0 0 11px rgba(185,175,240,.45);
+  }
 
   .feel { list-style: none; display: grid; gap: 16px 34px; margin-top: 44px;
           grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
@@ -598,12 +606,15 @@
     never mention. There are six of them, and the name that flashes is the
     reward for stumbling. Finding one is the best thing in here.</p>
     <div class="secrets">
-      <div class="secret"><h3>Riptide</h3><p>?&thinsp;+&thinsp;?</p></div>
-      <div class="secret"><h3>Tsunami</h3><p>?&thinsp;+&thinsp;?</p></div>
-      <div class="secret"><h3>Maelstrom</h3><p>?&thinsp;+&thinsp;?</p></div>
-      <div class="secret"><h3>Undertow</h3><p>?&thinsp;+&thinsp;?</p></div>
-      <div class="secret"><h3>Sea Quake</h3><p>?&thinsp;+&thinsp;?</p></div>
-      <div class="secret"><h3>Pearl Storm</h3><p>?&thinsp;+&thinsp;?</p></div>
+      <!-- Names only. Which two specials make which combo is the thing the
+           game withholds, so the site withholds it too — a bead, not a
+           recipe. -->
+      <div class="secret"><span class="bead" aria-hidden="true"></span><h3>Riptide</h3></div>
+      <div class="secret"><span class="bead" aria-hidden="true"></span><h3>Tsunami</h3></div>
+      <div class="secret"><span class="bead" aria-hidden="true"></span><h3>Maelstrom</h3></div>
+      <div class="secret"><span class="bead" aria-hidden="true"></span><h3>Undertow</h3></div>
+      <div class="secret"><span class="bead" aria-hidden="true"></span><h3>Sea Quake</h3></div>
+      <div class="secret"><span class="bead" aria-hidden="true"></span><h3>Pearl Storm</h3></div>
     </div>
     <p style="margin-top:38px">All six work on the board above, too. It keeps
     the secret just as well.</p>
