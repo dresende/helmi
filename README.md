@@ -1,17 +1,15 @@
 # Helmi — moved
 
 The website now lives at <https://offline-works.github.io/helmi/>, in the
-`offline-works` organisation. Edit it there; nothing in this repository is
-maintained.
+`offline-works` organisation. Edit it there.
 
-**Do not delete this repository, and do not touch `privacy.html`.** That path is
-compiled into the app (`AboutSheet.swift`) and is the URL any TestFlight build already installed resolves to, so it has to keep
-serving the full policy text from this exact URL. It may become a redirect only
-once a build has shipped naming the new URL, and this repository may only be
-deleted once no installed copy still points here.
+**This repository is now a pure redirect and is safe to delete** once a build
+has shipped naming the new URL. Both `index.html` and `privacy.html` bounce to
+the new site; nothing here is load-bearing.
 
-`index.html` is a client-side redirect to the new site — GitHub Pages serves
-static files only and cannot issue a real 301.
+That is true only because Helmi never shipped: the one build that named
+`dresende.github.io/helmi/privacy.html` is a TestFlight copy on the developer's
+own device, and `Helmi/AboutSheet.swift` now points at the new organisation.
 
-Nothing else is needed here. The icons were removed once the other sites stopped
-hot-linking them.
+**Sikku's and Kirjo's equivalents are different** — their privacy pages are in
+review and must keep serving the real policy text, not a redirect.
