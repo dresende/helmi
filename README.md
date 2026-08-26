@@ -1,6 +1,6 @@
 # Helmi — moved
 
-The website now lives at <https://offline-works.github.io/helmi/>, in the
+The website now lives at <https://helmi.dresende.pt/>, in the
 `offline-works` organisation. Edit it there.
 
 **This repository is now a pure redirect and is safe to delete** once a build
