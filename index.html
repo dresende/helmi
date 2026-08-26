@@ -255,23 +255,28 @@
   .zone .meta { margin-top: 14px; font-size: .84rem; color: var(--ink-faint);
                 font-variant-numeric: tabular-nums; }
 
+  /* Six of them, so the columns are pinned rather than auto-fit: a row of
+     six reads like a string of pearls, and every fallback divides evenly.
+     auto-fit left a 5 + 1 orphan at desktop widths. */
   .secrets { display: grid; gap: 14px; margin-top: 44px;
-             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+             grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  @media (max-width: 900px) { .secrets { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (max-width: 520px) { .secrets { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .secret {
-    text-align: center; padding: 26px 12px;
+    text-align: center; padding: 24px 10px;
     background: linear-gradient(165deg, var(--panel), rgba(255,255,255,.012));
     border: 1px solid var(--panel-edge); border-radius: var(--radius);
   }
   .secret h3 {
-    font-size: 1.05rem;
+    font-size: 1rem;
     background: linear-gradient(120deg, var(--rose), var(--peri) 55%, var(--glass));
     -webkit-background-clip: text; background-clip: text; color: transparent;
   }
   /* The same pearl construction as the wordmark's dot: nacre under a
      highlight, lit from the upper left. */
   .secret .bead {
-    display: block; width: 13px; height: 13px; border-radius: 50%;
-    margin: 0 auto 14px;
+    display: block; width: 17px; height: 17px; border-radius: 50%;
+    margin: 0 auto 13px;
     background:
       radial-gradient(circle at 33% 28%, rgba(255,255,255,.92), rgba(255,255,255,0) 55%),
       linear-gradient(135deg, var(--rose), var(--peri), var(--glass));
