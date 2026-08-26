@@ -1,0 +1,1741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Helmi &mdash; Match three. Mind the pearl.</title>
+<meta name="description" content="Helmi is a match-three puzzle for iPhone and iPad. A thousand levels descend through five waters — every one proved winnable before it shipped, and not one of them can be skipped.">
+<link rel="icon" href="icon-180.png" sizes="180x180">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Helmi &mdash; Match three. Mind the pearl.">
+<meta property="og:description" content="A match-three puzzle for iPhone and iPad. A thousand levels down through five waters. Every one proved winnable before it shipped — and not one of them can be skipped.">
+<meta property="og:image" content="https://dresende.github.io/helmi/icon-512.png">
+<meta property="og:url" content="https://dresende.github.io/helmi/">
+<meta name="twitter:card" content="summary">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+
+<!--
+  THE HERO BOARD IS ONE REAL LEVEL, PLAYED FOR REAL
+  -------------------------------------------------
+  The board below is level 1 of the sunlit zone, straight out of the app's
+  Helmi/Resources/levels.json: 5x5, four creatures, twelve moves, score 300 —
+  the deal the app itself opens with. The engine is a transliteration of
+  Helmi/Engine/Match3Engine.swift (which is itself a port of a JS engine, so
+  this is a round trip home): same mulberry32 RNG, same deal-rejection rules,
+  same forging priority, same lucky-pearl roll, so tide nº 90001 deals the
+  same board here as on the phone.
+
+  Only that single level's parameters are inlined. Do NOT paste in
+  levels.json: it carries all 1000 levels — seeds, budgets and objectives —
+  and a view-source would hand the whole descent away.
+
+  The glyphs are the app's own 24x24 vector paths (Helmi/Game/GlyphInk.swift),
+  and the palette below mirrors Helmi/Theme.swift. If either changes, change
+  it here.
+-->
+
+<style>
+  :root {
+    color-scheme: dark;
+
+    --bg: #0F171C;          /* Theme.canvas — deep water */
+    --bg-deep: #131E25;     /* Theme.canvasEdge */
+    --panel: rgba(255,255,255,.045);   /* Theme.card */
+    --panel-edge: #24333C;  /* Theme.hairline */
+    --ink: #E9F1F0;         /* Theme.ink — foam */
+    --ink-dim: #8DA0A6;     /* Theme.subtleText — mist */
+    --ink-faint: #78898F;   /* Theme.faintText */
+    --on-accent: #0B1013;   /* Theme.onAccent */
+
+    /* the nacre — Theme.nacreRose / nacrePeri / nacreGlass. The app rations
+       this gradient to the pearl, the wordmark's dot and the moments that
+       deserve it; the site spends it the same way. */
+    --rose: #F2A9C4;
+    --peri: #B9AFF0;
+    --glass: #9FE3D0;
+    --accent: var(--peri);
+
+    /* the five waters, darkening downwards (LevelMapView water tints) */
+    --z1a:#9FE3D0; --z1b:#5EC1C9;  /* Sunlit   */
+    --z2a:#8FA8D8; --z2b:#7D86CB;  /* Twilight */
+    --z3a:#7D86CB; --z3b:#3A3160;  /* Midnight */
+    --z4a:#4A5A9A; --z4b:#2B3849;  /* Abyssal  */
+    --z5a:#2B3849; --z5b:#131E25;  /* Trench   */
+
+    --radius: 20px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: "Atkinson Hyperlegible", -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  img { max-width: 100%; display: block; }
+  ::selection { background: var(--peri); color: var(--on-accent); }
+
+  h1, h2, h3, .display {
+    font-family: "Nunito", "Atkinson Hyperlegible", sans-serif;
+    font-weight: 800;
+    line-height: 1.12;
+    letter-spacing: 0.005em;
+  }
+
+  a { color: var(--accent); }
+  a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  .sr {
+    position: absolute; width: 1px; height: 1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+
+  /* ---------- atmosphere — a literal port of Theme.backdrop: the rose pool
+     above the surface, the glass pool below the floor ---------- */
+  .atmosphere { position: fixed; inset: 0; z-index: -1;
+    background:
+      radial-gradient(58vw 58vw at 50% -12%, rgba(242,169,196,.09), transparent 60%),
+      radial-gradient(54vw 54vw at 50% 112%, rgba(159,227,208,.07), transparent 60%),
+      linear-gradient(180deg, var(--bg), var(--bg-deep));
+  }
+  .atmosphere::after {
+    content: ""; position: absolute; inset: 0; opacity: .05;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* ---------- nav ---------- */
+  nav { display: flex; justify-content: space-between; align-items: center;
+        padding: 22px clamp(20px, 5vw, 56px); }
+  /* The wordmark is the app's own: lowercase, a dotless ı, and the dot
+     replaced by the pearl. */
+  .wordmark {
+    font-family: "Nunito", sans-serif; font-weight: 800;
+    font-size: 1.4rem; letter-spacing: .03em;
+    text-decoration: none; color: var(--ink);
+  }
+  .wordmark .iy { position: relative; }
+  .wordmark .pearl {
+    position: absolute; left: 50%; top: .02em;
+    width: .18em; height: .18em; border-radius: 50%;
+    transform: translateX(-50%);
+    background:
+      radial-gradient(circle at 33% 28%, rgba(255,255,255,.95), rgba(255,255,255,0) 55%),
+      linear-gradient(135deg, var(--rose), var(--peri), var(--glass));
+    box-shadow: 0 0 .3em rgba(185,175,240,.55);
+  }
+  nav .links { display: flex; gap: 26px; }
+  nav .links a { color: var(--ink-dim); text-decoration: none; font-size: .95rem; }
+  nav .links a:hover { color: var(--ink); }
+
+  /* ---------- hero ---------- */
+  header.hero {
+    display: flex; flex-direction: column; align-items: center;
+    text-align: center; padding: 3vh 24px 7vh;
+  }
+  .tagline { font-size: clamp(1.9rem, 5.5vw, 3.4rem); max-width: 16ch; }
+  .tagline em { font-style: normal; color: var(--peri); }
+  @supports (background-clip: text) or (-webkit-background-clip: text) {
+    .tagline em {
+      background: linear-gradient(120deg, var(--rose), var(--peri) 55%, var(--glass));
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+  }
+
+  .stage { margin-top: 5vh; }
+  /* iOS Safari does not reliably honour touch-action on an SVG element, so the
+     rule has to live on an HTML box as well. Without it Safari treats the first
+     part of a gesture as a possible page pan. (Learned the hard way on sikku.) */
+  .boardwrap { touch-action: none; -webkit-tap-highlight-color: transparent; }
+  .board {
+    width: min(80vw, 350px); aspect-ratio: 1; display: block; margin: 0 auto;
+    touch-action: none; -webkit-tap-highlight-color: transparent;
+    user-select: none; -webkit-user-select: none; cursor: pointer;
+  }
+  .board:focus { outline: none; }
+  .board:focus-visible { outline: 3px solid var(--peri); outline-offset: 8px; border-radius: 10px; }
+  .cell { fill: rgba(255,255,255,.045); }
+
+  #selring { fill: rgba(185,175,240,.10); stroke: var(--peri); stroke-width: 2.5; }
+  #cursor  { fill: none; stroke: var(--ink-dim); stroke-width: 2; stroke-dasharray: 7 5; }
+
+  /* No CSS filters anywhere on the board, deliberately: a filter's region is
+     the element's bounding box, and several things here (a lone current line,
+     a fresh dash) can have a zero-height box — a filtered one silently paints
+     nothing. Glows are extra geometry instead. */
+
+  .readout {
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+    margin-top: 20px; min-height: 2.1em; font-size: .95rem; flex-wrap: wrap;
+  }
+  .count { color: var(--ink-faint); font-variant-numeric: tabular-nums;
+           letter-spacing: .06em; }
+  .banner { color: var(--peri); opacity: 0; transition: opacity .25s; }
+  .banner.show { opacity: 1; }
+  .replay {
+    background: none; border: 1px solid var(--panel-edge); color: var(--ink-dim);
+    font: inherit; font-size: .9rem; padding: 5px 16px; border-radius: 999px;
+    cursor: pointer; display: none;
+  }
+  .stage.over .replay { display: inline-block; }
+  .replay:hover { color: var(--ink); }
+  .tideno { margin-top: 4px; font-size: .78rem; color: var(--ink-faint);
+            letter-spacing: .1em; text-transform: uppercase; }
+
+  .hint { color: var(--ink-dim); margin-top: 14px; font-size: 1rem; max-width: 36ch; }
+  .hint b { color: var(--ink); }
+
+  .appstore {
+    display: inline-flex; align-items: center; gap: 12px; margin-top: 30px;
+    padding: 15px 30px; border-radius: 999px; font-weight: 700;
+    text-decoration: none; font-size: 1.02rem;
+  }
+  .appstore.soon {
+    background: var(--panel); border: 1px solid var(--panel-edge);
+    color: var(--ink-dim); cursor: default;
+  }
+  .appstore svg { width: 19px; height: 22px; fill: currentColor; }
+
+  .platforms { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+               margin-top: 24px; }
+  .pill {
+    font-size: .82rem; color: var(--ink-faint); border: 1px solid var(--panel-edge);
+    background: var(--panel); padding: 6px 15px; border-radius: 999px;
+  }
+
+  /* ---------- sections ---------- */
+  main { max-width: 1060px; margin: 0 auto; padding: 0 clamp(20px, 5vw, 56px) 40px; }
+  section { margin: 13vh 0; }
+  .kicker {
+    font-family: "Nunito", sans-serif; font-weight: 800;
+    text-transform: uppercase; letter-spacing: .22em; font-size: .8rem;
+    color: var(--accent); margin-bottom: 14px;
+  }
+  section h2 { font-size: clamp(1.7rem, 4vw, 2.6rem); max-width: 24ch; }
+  section p { color: var(--ink-dim); max-width: 48ch; margin-top: 18px; }
+  section p b { color: var(--ink); }
+
+  .rules { display: grid; gap: 16px; margin-top: 44px;
+           grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .rule {
+    background: linear-gradient(165deg, var(--panel), rgba(255,255,255,.012));
+    border: 1px solid var(--panel-edge); border-radius: var(--radius);
+    padding: 30px 26px;
+  }
+  .rule .num-badge {
+    font-family: "Nunito", sans-serif; font-weight: 900;
+    font-size: 1.5rem; color: var(--accent); display: block; margin-bottom: 12px;
+  }
+  .rule p { margin: 0; color: var(--ink); max-width: none; font-size: 1.02rem; }
+
+  .waters { display: grid; gap: 16px; margin-top: 44px;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .zone {
+    position: relative; overflow: hidden;
+    background: linear-gradient(165deg, var(--panel), rgba(255,255,255,.012));
+    border: 1px solid var(--panel-edge); border-radius: var(--radius);
+    padding: 26px 24px;
+  }
+  .zone::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
+                  background: linear-gradient(90deg, var(--a), var(--b)); }
+  .zone .swatch { width: 34px; height: 34px; border-radius: 11px; margin-bottom: 16px;
+                  background: linear-gradient(135deg, var(--a), var(--b)); }
+  .zone h3 { font-size: 1.15rem; }
+  .zone .sub { color: var(--ink-dim); font-size: .95rem; }
+  .zone .meta { margin-top: 14px; font-size: .84rem; color: var(--ink-faint);
+                font-variant-numeric: tabular-nums; }
+
+  .secrets { display: grid; gap: 14px; margin-top: 44px;
+             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .secret {
+    text-align: center; padding: 26px 12px;
+    background: linear-gradient(165deg, var(--panel), rgba(255,255,255,.012));
+    border: 1px solid var(--panel-edge); border-radius: var(--radius);
+  }
+  .secret h3 {
+    font-size: 1.05rem;
+    background: linear-gradient(120deg, var(--rose), var(--peri) 55%, var(--glass));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .secret p { color: var(--ink-faint); font-size: .82rem; margin-top: 6px;
+              max-width: none; letter-spacing: .14em; }
+
+  .feel { list-style: none; display: grid; gap: 16px 34px; margin-top: 44px;
+          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .feel li { color: var(--ink-dim); padding-left: 20px; position: relative; }
+  .feel li::before { content: ""; position: absolute; left: 0; top: .62em;
+                     width: 7px; height: 7px; border-radius: 50%;
+                     background: linear-gradient(135deg, var(--rose), var(--glass)); }
+  .feel li b { color: var(--ink); }
+
+  .split { display: flex; flex-wrap: wrap; gap: 16px; }
+  .split .panel {
+    flex: 1 1 300px;
+    background: linear-gradient(165deg, var(--panel), rgba(255,255,255,.012));
+    border: 1px solid var(--panel-edge); border-radius: var(--radius);
+    padding: 34px 30px;
+  }
+  .split .panel h2 { font-size: 1.35rem; max-width: none; }
+  .split .panel p { font-size: .97rem; max-width: none; margin-top: 14px; }
+  .langs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+  .langs span {
+    font-size: .8rem; color: var(--ink-faint); border: 1px solid var(--panel-edge);
+    padding: 5px 12px; border-radius: 999px;
+  }
+
+  .siblings { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 40px; }
+  .sibling {
+    flex: 1 1 300px; display: flex; align-items: center; gap: 18px;
+    text-decoration: none; color: inherit;
+    background: linear-gradient(165deg, var(--panel), rgba(255,255,255,.012));
+    border: 1px solid var(--panel-edge); border-radius: var(--radius);
+    padding: 22px 24px; transition: transform .3s cubic-bezier(.2,.9,.3,1);
+  }
+  .sibling:hover { transform: translateY(-3px); }
+  .sibling .mark { border-radius: 12px; }
+  .sibling h3 { font-size: 1.08rem; }
+  .sibling p { color: var(--ink-dim); font-size: .92rem; margin: 2px 0 0;
+               max-width: none; }
+
+  #support { text-align: center; }
+  #support h2, #support p { margin-left: auto; margin-right: auto; }
+  .mail {
+    display: inline-block; margin-top: 28px; padding: 15px 32px;
+    border-radius: 999px; font-weight: 700; text-decoration: none;
+    color: var(--on-accent);
+    background: linear-gradient(120deg, var(--rose), var(--peri) 55%, var(--glass));
+    box-shadow: 0 18px 40px -14px rgba(185,175,240,.55);
+    transition: transform .3s cubic-bezier(.2,.9,.3,1), box-shadow .3s;
+  }
+  .mail:hover { transform: translateY(-3px); box-shadow: 0 24px 50px -14px rgba(185,175,240,.65); }
+
+  footer {
+    display: flex; flex-wrap: wrap; gap: 14px 28px; justify-content: space-between;
+    align-items: center; padding: 40px clamp(20px, 5vw, 56px) 50px;
+    border-top: 1px solid var(--panel-edge); color: var(--ink-faint);
+    font-size: .88rem;
+  }
+  footer a { color: var(--ink-dim); text-decoration: none; }
+  footer a:hover { color: var(--ink); }
+  .etym { font-style: italic; }
+
+  /* ---------- motion ---------- */
+  @keyframes rise { from { opacity: 0; transform: translateY(26px); }
+                    to   { opacity: 1; transform: none; } }
+  .hero > * { animation: rise .8s cubic-bezier(.2,.9,.3,1) both; }
+  .hero > *:nth-child(1) { animation-delay: .12s; }
+  .hero > *:nth-child(2) { animation-delay: .24s; }
+  .hero > *:nth-child(3) { animation-delay: .36s; }
+  .hero > *:nth-child(4) { animation-delay: .48s; }
+  .hero > *:nth-child(5) { animation-delay: .56s; }
+  .hero > *:nth-child(6) { animation-delay: .62s; }
+
+  .reveal { transition: opacity .7s, transform .7s cubic-bezier(.2,.9,.3,1); }
+  html.js .reveal { opacity: 0; transform: translateY(30px); }
+  html.js .reveal.in { opacity: 1; transform: none; }
+
+  @media (max-width: 700px) {
+    .split .panel, .sibling { flex: 1 1 100%; }
+    section { margin: 10vh 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    html { scroll-behavior: auto; }
+    .reveal { opacity: 1 !important; transform: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="atmosphere" aria-hidden="true"></div>
+
+<nav>
+  <a class="wordmark" href="#">helm<span class="iy">&#305;<span class="pearl" aria-hidden="true"></span></span><span class="sr">Helmi</span></a>
+  <div class="links">
+    <a href="#descent">The descent</a>
+    <a href="#support">Support</a>
+    <a href="privacy.html">Privacy</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <h1 class="tagline">Match three. <em>Mind the pearl.</em></h1>
+
+  <div class="stage" id="stage">
+    <div class="boardwrap">
+    <svg class="board" id="board" viewBox="0 0 500 500" tabindex="0"
+         role="application"
+         aria-label="Playable match-three board, 5 by 5. Tap or drag two neighbouring creatures to swap them, or use the arrow keys with Enter."
+         aria-describedby="boardHelp">
+      <defs>
+        <!-- The nacre, in bounding-box units — safe here because it only ever
+             fills circles, which always have a proper box. Anything stroked in
+             board space would need userSpaceOnUse instead. -->
+        <linearGradient id="nacre" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#F2A9C4"/>
+          <stop offset=".55" stop-color="#B9AFF0"/>
+          <stop offset="1" stop-color="#9FE3D0"/>
+        </linearGradient>
+        <radialGradient id="pearlHi" cx=".5" cy=".5" r=".5">
+          <stop offset="0" stop-color="rgba(255,255,255,.95)"/>
+          <stop offset="1" stop-color="rgba(255,255,255,0)"/>
+        </radialGradient>
+        <radialGradient id="pearlGlow" cx=".5" cy=".5" r=".5">
+          <stop offset="0" stop-color="rgba(185,175,240,.5)"/>
+          <stop offset="1" stop-color="rgba(185,175,240,0)"/>
+        </radialGradient>
+
+        <!-- The creatures: the app's own 24x24 ink glyphs, path for path
+             (Helmi/Game/GlyphInk.swift). Colours from GameScene.Palette. -->
+        <g id="g0"><!-- octopus #D58CDD -->
+          <path d="M7.6 12.6C8.4 15.6 3.6 17.4 4.9 19.8M10.6 13.4C11.4 16.4 7.9 19 9.6 21M13.4 13.4C12.6 16.4 16.1 19 14.4 21M16.4 12.6C15.6 15.6 20.4 17.4 19.1 19.8" fill="none" stroke="#D58CDD" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="4.9" cy="19.8" r="1.15" fill="#D58CDD"/>
+          <circle cx="9.6" cy="21" r="1.15" fill="#D58CDD"/>
+          <circle cx="14.4" cy="21" r="1.15" fill="#D58CDD"/>
+          <circle cx="19.1" cy="19.8" r="1.15" fill="#D58CDD"/>
+          <circle cx="12" cy="8.7" r="5.7" fill="#D58CDD"/>
+          <circle cx="9.9" cy="9.4" r="1" fill="rgba(15,23,28,.35)"/>
+          <circle cx="14.1" cy="9.4" r="1" fill="rgba(15,23,28,.35)"/>
+          <circle cx="9.6" cy="9.1" r=".35" fill="rgba(255,255,255,.7)"/>
+          <circle cx="13.8" cy="9.1" r=".35" fill="rgba(255,255,255,.7)"/>
+          <path d="M8.5 6.6Q9.8 4.5 12.6 4.4" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="1.3" stroke-linecap="round"/>
+        </g>
+        <g id="g1"><!-- butterflyfish #F6C757 -->
+          <path d="M3.8 13C5.6 9 8.4 4.8 12.2 4.8C16.2 4.8 18.4 8.4 18.4 12C18.4 15.8 15.6 19.8 11.6 19.8C7.6 19.8 5.2 16.2 3.8 13Z" fill="#F6C757"/>
+          <path d="M17.9 12L21.8 9.8Q20 12 21.8 14.2Z" fill="#F6C757"/>
+          <path d="M7.9 6.9Q6.6 11.8 7 16.8" fill="none" stroke="rgba(15,23,28,.55)" stroke-width="2" stroke-linecap="round"/>
+          <path d="M15.4 6.6L16.8 8.4M15.8 17.2L17 15.6" fill="none" stroke="rgba(15,23,28,.35)" stroke-width="1" stroke-linecap="round"/>
+          <circle cx="7.5" cy="10.4" r=".95" fill="rgba(15,23,28,.8)"/>
+          <circle cx="7.2" cy="10.1" r=".34" fill="rgba(255,255,255,.75)"/>
+          <path d="M9.6 6.6Q11.8 4.8 14.4 6" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="1.3" stroke-linecap="round"/>
+        </g>
+        <g id="g2"><!-- starfish #ED794C -->
+          <path d="M12 1.9Q13.99 7.39 14.76 8.5Q16.06 8.89 21.89 9.09Q17.29 12.67 16.47 13.75Q16.49 15.11 18.11 20.71Q13.28 17.44 12 17Q10.72 17.44 5.89 20.71Q7.51 15.11 7.53 13.75Q6.71 12.67 2.11 9.09Q7.94 8.89 9.24 8.5Q10.01 7.39 12 1.9Z" fill="#ED794C" stroke="#ED794C" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+          <circle cx="12" cy="12.3" r="1.4" fill="rgba(15,23,28,.35)"/>
+          <circle cx="12" cy="5.9" r=".75" fill="rgba(15,23,28,.35)"/>
+          <circle cx="12" cy="3.7" r=".5" fill="rgba(15,23,28,.35)"/>
+          <circle cx="18.09" cy="10.32" r=".75" fill="rgba(15,23,28,.35)"/>
+          <circle cx="20.18" cy="9.64" r=".5" fill="rgba(15,23,28,.35)"/>
+          <circle cx="15.76" cy="17.48" r=".75" fill="rgba(15,23,28,.35)"/>
+          <circle cx="17.05" cy="19.26" r=".5" fill="rgba(15,23,28,.35)"/>
+          <circle cx="8.24" cy="17.48" r=".75" fill="rgba(15,23,28,.35)"/>
+          <circle cx="6.95" cy="19.26" r=".5" fill="rgba(15,23,28,.35)"/>
+          <circle cx="5.91" cy="10.32" r=".75" fill="rgba(15,23,28,.35)"/>
+          <circle cx="3.82" cy="9.64" r=".5" fill="rgba(15,23,28,.35)"/>
+          <circle cx="13.59" cy="10.12" r=".65" fill="rgba(255,255,255,.55)"/>
+          <path d="M10.2 11.2Q10.7 9.9 12 9.9" fill="none" stroke="rgba(255,255,255,.4)" stroke-width="1.1" stroke-linecap="round"/>
+        </g>
+        <g id="g3"><!-- shell #E5DBC6 -->
+          <path d="M12 6.2L19.9 14.97Q19.64 17.69 17.02 16.88Q15.99 19.41 13.72 17.87Q12 20 10.28 17.87Q8.01 19.41 6.98 16.88Q4.36 17.69 4.1 14.97Z" fill="#E5DBC6" stroke="#E5DBC6" stroke-width="1" stroke-linejoin="round"/>
+          <path d="M13.02 8.37L16.6 15.97M12.35 8.57L13.58 16.88M11.65 8.57L10.42 16.88M10.98 8.37L7.4 15.97" fill="none" stroke="rgba(15,23,28,.22)" stroke-width="1.2" stroke-linecap="round"/>
+          <circle cx="12" cy="8" r=".9" fill="rgba(15,23,28,.35)"/>
+          <path d="M8.2 10.6Q11.8 8.4 15.4 10.2" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="1.2" stroke-linecap="round"/>
+        </g>
+      </defs>
+
+      <g>
+        <rect class="cell" x="6"   y="6"   width="88" height="88" rx="18"/>
+        <rect class="cell" x="106" y="6"   width="88" height="88" rx="18"/>
+        <rect class="cell" x="206" y="6"   width="88" height="88" rx="18"/>
+        <rect class="cell" x="306" y="6"   width="88" height="88" rx="18"/>
+        <rect class="cell" x="406" y="6"   width="88" height="88" rx="18"/>
+        <rect class="cell" x="6"   y="106" width="88" height="88" rx="18"/>
+        <rect class="cell" x="106" y="106" width="88" height="88" rx="18"/>
+        <rect class="cell" x="206" y="106" width="88" height="88" rx="18"/>
+        <rect class="cell" x="306" y="106" width="88" height="88" rx="18"/>
+        <rect class="cell" x="406" y="106" width="88" height="88" rx="18"/>
+        <rect class="cell" x="6"   y="206" width="88" height="88" rx="18"/>
+        <rect class="cell" x="106" y="206" width="88" height="88" rx="18"/>
+        <rect class="cell" x="206" y="206" width="88" height="88" rx="18"/>
+        <rect class="cell" x="306" y="206" width="88" height="88" rx="18"/>
+        <rect class="cell" x="406" y="206" width="88" height="88" rx="18"/>
+        <rect class="cell" x="6"   y="306" width="88" height="88" rx="18"/>
+        <rect class="cell" x="106" y="306" width="88" height="88" rx="18"/>
+        <rect class="cell" x="206" y="306" width="88" height="88" rx="18"/>
+        <rect class="cell" x="306" y="306" width="88" height="88" rx="18"/>
+        <rect class="cell" x="406" y="306" width="88" height="88" rx="18"/>
+        <rect class="cell" x="6"   y="406" width="88" height="88" rx="18"/>
+        <rect class="cell" x="106" y="406" width="88" height="88" rx="18"/>
+        <rect class="cell" x="206" y="406" width="88" height="88" rx="18"/>
+        <rect class="cell" x="306" y="406" width="88" height="88" rx="18"/>
+        <rect class="cell" x="406" y="406" width="88" height="88" rx="18"/>
+      </g>
+      <rect id="selring" x="4" y="4" width="92" height="92" rx="21" display="none"/>
+      <rect id="cursor"  x="4" y="4" width="92" height="92" rx="21" display="none"/>
+      <g id="pieces"></g>
+    </svg>
+    </div>
+    <p id="boardHelp" class="sr">This is level 1 of the sunlit zone. Swap two
+    neighbouring creatures to line up three of a kind. Reach 300 points within
+    twelve moves.</p>
+    <p class="sr" id="say" aria-live="polite"></p>
+
+    <div class="readout">
+      <span class="count" id="count">0 / 300 &middot; 12 moves</span>
+      <span class="banner" id="banner"></span>
+      <button class="replay" id="replay" type="button">Play it again</button>
+    </div>
+    <p class="tideno">tide n&ordm; 90001</p>
+  </div>
+
+  <p class="hint"><b>Go on &mdash; swap two neighbours.</b> This is level 1,
+  the same deal the app opens with.</p>
+
+  <span class="appstore soon">
+    <svg viewBox="0 0 384 512" aria-hidden="true"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-36.8-2.8-77 21.3-91.7 21.3-15.5 0-51.1-20.3-79-20.3C61.2 141.2 12 184.5 12 271.3c0 25.6 4.7 52 14.1 79.3 12.6 35.9 45.9 104 80.6 102.9 18.2-.4 31-12.9 54.7-12.9 23 0 34.8 12.9 55.1 12.9 35 .5 65.2-61.4 78.4-97.4-47-22.2-76.2-58.4-76.2-87.4zM252.3 84.2c17.9-21.3 27.3-46.5 24.9-75.9-28.8 1.7-53.1 15.2-71.5 36.5-16.4 19.1-25.3 43.2-23.3 71.4 26.4 2 50.3-11.1 69.9-32z"/></svg>
+    Coming to the App Store
+  </span>
+
+  <div class="platforms">
+    <span class="pill">iPhone</span>
+    <span class="pill">iPad</span>
+    <span class="pill">iOS 17</span>
+  </div>
+</header>
+
+<main>
+
+  <section id="how" class="reveal">
+    <p class="kicker">How it works</p>
+    <h2>Three rules. That&rsquo;s the whole game.</h2>
+    <div class="rules">
+      <div class="rule">
+        <span class="num-badge">01</span>
+        <p>Swap neighbours to line up three of a kind. Chains multiply the score.</p>
+      </div>
+      <div class="rule">
+        <span class="num-badge">02</span>
+        <p>Four in a line forge a current, which sweeps its whole row or column.
+        An L or a T forges a burst.</p>
+      </div>
+      <div class="rule">
+        <span class="num-badge">03</span>
+        <p>Five forge a pearl. Swap it with any creature and it claims every
+        creature of that kind on the board.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="descent" class="reveal">
+    <p class="kicker">The descent</p>
+    <h2>A thousand levels. Five waters.</h2>
+    <p>The levels descend from sunlit water into the trench, through five zones
+    that each read like a different sea. New creatures join the deal on the way
+    down &mdash; eight by the end &mdash; and in the deep the board stops being
+    a square.</p>
+    <div class="waters">
+      <div class="zone" style="--a:var(--z1a);--b:var(--z1b)">
+        <div class="swatch"></div>
+        <h3>Sunlit Water</h3>
+        <p class="sub">Learn the sea</p>
+        <p class="meta">levels 1&ndash;100 &middot; 5&times;5 &rarr; 8&times;8 &middot; 4&ndash;6 creatures</p>
+      </div>
+      <div class="zone" style="--a:var(--z2a);--b:var(--z2b)">
+        <div class="swatch"></div>
+        <h3>Twilight</h3>
+        <p class="sub">The light thins</p>
+        <p class="meta">levels 101&ndash;250 &middot; 8&times;8 &middot; a seventh creature</p>
+      </div>
+      <div class="zone" style="--a:var(--z3a);--b:var(--z3b)">
+        <div class="swatch"></div>
+        <h3>Midnight</h3>
+        <p class="sub">Corners go missing</p>
+        <p class="meta">levels 251&ndash;450 &middot; the first shaped boards</p>
+      </div>
+      <div class="zone" style="--a:var(--z4a);--b:var(--z4b)">
+        <div class="swatch"></div>
+        <h3>Abyssal</h3>
+        <p class="sub">Taller than wide</p>
+        <p class="meta">levels 451&ndash;700 &middot; 8&times;10 &middot; an eighth creature</p>
+      </div>
+      <div class="zone" style="--a:var(--z5a);--b:var(--z5b)">
+        <div class="swatch"></div>
+        <h3>The Trench</h3>
+        <p class="sub">The floor of the game</p>
+        <p class="meta">levels 701&ndash;1000 &middot; every creature, every shape</p>
+      </div>
+    </div>
+    <p style="margin-top:38px"><b>Not one of them can be skipped.</b> The next
+    level is always one past the deepest you&rsquo;ve solved &mdash; a level that
+    beats you is hard, not unfair.</p>
+    <p>Ten levels down, the <b>free tide</b> opens: an endless mode in three
+    waters &mdash; easy, medium, hard &mdash; each keeping its own best score.</p>
+  </section>
+
+  <section class="reveal">
+    <p class="kicker">Level design</p>
+    <h2>Every level was proved winnable before it shipped.</h2>
+    <p>Each level is a dealt board with its own goal &mdash; reach a score,
+    gather a creature, forge a mark &mdash; and each was <b>played to the end by
+    a bot</b> before release: no perks, no favours, inside the move budget,
+    all one thousand of them.</p>
+    <p>Difficulty is <b>measured, not guessed</b>. The bot&rsquo;s win rate is the
+    honest number, and the curve is tuned so the difficulty climbs rather than
+    jumps.</p>
+    <p>And none of them needs anything from the pouch. <b>Bare hands reach the
+    trench floor.</b></p>
+    <p>The same thousand levels ship on every device. No server, no daily
+    shuffle, nothing generated behind your back &mdash; tide n&ordm; 90001 is the
+    same deal for you as for everyone else. It&rsquo;s the one playing at the top
+    of this page.</p>
+  </section>
+
+  <section class="reveal">
+    <p class="kicker">The secrets</p>
+    <h2>Six things the game never explains.</h2>
+    <p>Swap two specials into each other and something happens that the rules
+    never mention. There are six of them, and the name that flashes is the
+    reward for stumbling. Finding one is the best thing in here.</p>
+    <div class="secrets">
+      <div class="secret"><h3>Riptide</h3><p>?&thinsp;+&thinsp;?</p></div>
+      <div class="secret"><h3>Tsunami</h3><p>?&thinsp;+&thinsp;?</p></div>
+      <div class="secret"><h3>Maelstrom</h3><p>?&thinsp;+&thinsp;?</p></div>
+      <div class="secret"><h3>Undertow</h3><p>?&thinsp;+&thinsp;?</p></div>
+      <div class="secret"><h3>Sea Quake</h3><p>?&thinsp;+&thinsp;?</p></div>
+      <div class="secret"><h3>Pearl Storm</h3><p>?&thinsp;+&thinsp;?</p></div>
+    </div>
+    <p style="margin-top:38px">All six work on the board above, too. It keeps
+    the secret just as well.</p>
+  </section>
+
+  <section class="reveal">
+    <p class="kicker">Feel</p>
+    <h2>Designed around the swap.</h2>
+    <ul class="feel">
+      <li><b>A tick under your finger</b> for every match, and a firmer pulse
+      when something forges. Both switchable.</li>
+      <li><b>Every sound is synthesised as you play</b> &mdash; thirteen of them,
+      from the smallest pop to the pearl storm, and not a single audio file.</li>
+      <li><b>A dead board reshuffles itself</b>, free and automatically. No move
+      is never the game&rsquo;s answer.</li>
+      <li><b>Reduce Motion is honoured everywhere</b> &mdash; the sea calms down,
+      the game doesn&rsquo;t.</li>
+      <li><b>Never colour alone:</b> every creature has its own shape, so two of
+      them never have to be told apart by hue.</li>
+      <li><b>AA contrast throughout</b>, from the level map down to the smallest
+      caption.</li>
+    </ul>
+  </section>
+
+  <section class="reveal">
+    <div class="split">
+      <div class="panel">
+        <p class="kicker">Free to download</p>
+        <h2>The pouch is optional.</h2>
+        <p>Helmi is free to download, and all thousand levels are there from the
+        first launch. What&rsquo;s for sale is refills of the pouch &mdash; more
+        moves, a pearl sweep, a fresh board &mdash; and the pouch fills itself
+        anyway: one of each, free, every ten levels down.</p>
+        <p>No level needs anything from it. No subscription, no ads, and no
+        upsell in the middle of a move.</p>
+      </div>
+      <div class="panel">
+        <p class="kicker">Every device</p>
+        <h2>Your descent follows you.</h2>
+        <p>Solved levels, free-tide bests and the pouch sync through your own
+        iCloud, so the iPad picks up where the iPhone left off.</p>
+        <p>There is no account and no server of ours &mdash; the record lives in
+        your iCloud, readable by your devices and nobody else.</p>
+      </div>
+      <div class="panel">
+        <p class="kicker">Twelve languages</p>
+        <h2>All of it translated.</h2>
+        <p>Not just the menus &mdash; the rules, the goals, and the small line of
+        encouragement when a new water opens.</p>
+        <div class="langs">
+          <span>English</span>
+          <span>Deutsch</span>
+          <span>Espa&ntilde;ol</span>
+          <span>Espa&ntilde;ol (M&eacute;xico)</span>
+          <span>Fran&ccedil;ais</span>
+          <span>Italiano</span>
+          <span>&#26085;&#26412;&#35486;</span>
+          <span>&#54620;&#44397;&#50612;</span>
+          <span>Portugu&ecirc;s</span>
+          <span>Portugu&ecirc;s (Brasil)</span>
+          <span>&#1056;&#1091;&#1089;&#1089;&#1082;&#1080;&#1081;</span>
+          <span>&#31616;&#20307;&#20013;&#25991;</span>
+        </div>
+      </div>
+      <div class="panel">
+        <p class="kicker">Private by design</p>
+        <h2>No accounts. No ads. No analytics.</h2>
+        <p>Helmi collects nothing &mdash; no tracking, no advertising, no
+        third-party SDKs, nothing to sign up for. Its privacy manifest declares
+        no collected data at all.</p>
+        <p>Your descent is yours: on your device, and in your iCloud.</p>
+        <p><a href="privacy.html">Read the full privacy policy &rarr;</a></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="reveal">
+    <p class="kicker">More from us</p>
+    <h2>Same promise, different puzzle.</h2>
+    <div class="siblings">
+      <a class="sibling" href="https://dresende.github.io/sikku/">
+        <img class="mark" src="https://dresende.github.io/sikku/icon-180.png"
+             alt="" width="52" height="52" loading="lazy">
+        <span>
+          <h3>Sikku</h3>
+          <p>One line. Every cell. In order.</p>
+        </span>
+      </a>
+      <a class="sibling" href="https://dresende.github.io/kirjo/">
+        <img class="mark" src="https://dresende.github.io/kirjo/icon-180.png"
+             alt="" width="52" height="52" loading="lazy">
+        <span>
+          <h3>Kirjo</h3>
+          <p>Pour the light. Sort the spectrum.</p>
+        </span>
+      </a>
+    </div>
+  </section>
+
+  <section id="support" class="reveal">
+    <p class="kicker">Support</p>
+    <h2>Questions? Ideas? A level that feels wrong?</h2>
+    <p>Helmi is made by one person who reads every email. Bug reports, feature
+    requests, or a deal you think is unfair:</p>
+    <a class="mail" href="mailto:dresende@thinkdigital.pt">dresende@thinkdigital.pt</a>
+  </section>
+
+</main>
+
+<footer>
+  <span>&copy; 2026 Diogo Resende</span>
+  <span class="etym">helmi &mdash; Finnish for &ldquo;pearl&rdquo;.</span>
+  <a href="privacy.html">Privacy Policy</a>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  document.documentElement.classList.add("js");
+
+  /* Scroll reveals — the hidden state only applies once JS is running, so the
+     page is fully readable without it. */
+  if (window.IntersectionObserver) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); }
+      });
+    }, { threshold: 0.12 });
+    document.querySelectorAll(".reveal").forEach(function (el) { io.observe(el); });
+  } else {
+    document.querySelectorAll(".reveal").forEach(function (el) { el.classList.add("in"); });
+  }
+
+  /* ================================================================ ENGINE
+     A transliteration of Helmi/Engine/Match3Engine.swift. Level 1 is the
+     only level inlined — never paste in levels.json. */
+  /*ENGINE-BEGIN*/
+  var LEVEL = { id: 1, seed: 90001, rows: 5, cols: 5, types: 4,
+                moves: 12, target: 300 };
+  var ROWS = LEVEL.rows, COLS = LEVEL.cols, TYPES = LEVEL.types;
+  var LUCKY = 0.1;   /* Match3Engine.luckyPearlChance */
+
+  /* mulberry32 — bit-identical to the app's Mulberry32, which is itself
+     bit-identical to the JS original. Full circle. */
+  function mulberry32(seed) {
+    var a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), a | 1);
+      t = (t + Math.imul(t ^ (t >>> 7), t | 61)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  var rng, grid;   /* grid[r][c] = { t: 0..TYPES-1 | -1 pearl, sp: null|"row"|"col"|"bomb"|"pearl" } */
+
+  function randType() { return Math.floor(rng() * TYPES); }
+  function idx(cell) { return cell.r * COLS + cell.c; }
+  function cellAt(i) { return { r: Math.floor(i / COLS), c: i % COLS }; }
+
+  /* The deal, with all three rejection clauses — no third in a line and no
+     fourth corner of a block. The corner clause is what parts Helmi's seeds
+     from the old web build's; without it tide nº 90001 deals a different sea. */
+  function fillInitial() {
+    grid = [];
+    for (var r = 0; r < ROWS; r++) {
+      var row = [];
+      for (var c = 0; c < COLS; c++) {
+        var t;
+        do { t = randType(); }
+        while ((c >= 2 && row[c - 1].t === t && row[c - 2].t === t) ||
+               (r >= 2 && grid[r - 1][c].t === t && grid[r - 2][c].t === t) ||
+               (r >= 1 && c >= 1 && row[c - 1].t === t &&
+                grid[r - 1][c].t === t && grid[r - 1][c - 1].t === t));
+        row.push({ t: t, sp: null });
+      }
+      grid.push(row);
+    }
+    if (!findValidMove()) doReshuffle();
+  }
+
+  function findRuns() {
+    var runs = [], r, c, start, cells, x;
+    for (r = 0; r < ROWS; r++) {
+      start = 0;
+      for (c = 1; c <= COLS; c++) {
+        if (c < COLS && grid[r][start].t >= 0 && grid[r][c].t === grid[r][start].t) continue;
+        if (c - start >= 3) {
+          cells = [];
+          for (x = start; x < c; x++) cells.push({ r: r, c: x });
+          runs.push({ cells: cells, len: c - start, h: true });
+        }
+        start = c;
+      }
+    }
+    for (c = 0; c < COLS; c++) {
+      start = 0;
+      for (r = 1; r <= ROWS; r++) {
+        if (r < ROWS && grid[start][c].t >= 0 && grid[r][c].t === grid[start][c].t) continue;
+        if (r - start >= 3) {
+          cells = [];
+          for (x = start; x < r; x++) cells.push({ r: x, c: c });
+          runs.push({ cells: cells, len: r - start, h: false });
+        }
+        start = r;
+      }
+    }
+    return runs;
+  }
+
+  /* Every 2×2 block of one creature — a four you can hold in both hands. */
+  function findSquares() {
+    var sq = [], r, c, t;
+    for (r = 0; r < ROWS - 1; r++) {
+      for (c = 0; c < COLS - 1; c++) {
+        t = grid[r][c].t;
+        if (t < 0) continue;
+        if (grid[r][c + 1].t === t && grid[r + 1][c].t === t && grid[r + 1][c + 1].t === t) {
+          sq.push({ r: r, c: c });
+        }
+      }
+    }
+    return sq;
+  }
+  function squareCells(s) {
+    return [{ r: s.r, c: s.c }, { r: s.r, c: s.c + 1 },
+            { r: s.r + 1, c: s.c }, { r: s.r + 1, c: s.c + 1 }];
+  }
+  function hasMatch() { return findRuns().length > 0 || findSquares().length > 0; }
+
+  function mostCommonType() {
+    var counts = [], t, r, c;
+    for (t = 0; t < TYPES; t++) counts.push(0);
+    for (r = 0; r < ROWS; r++) {
+      for (c = 0; c < COLS; c++) if (grid[r][c].t >= 0) counts[grid[r][c].t]++;
+    }
+    var best = 0;
+    for (t = 1; t < TYPES; t++) if (counts[t] > counts[best]) best = t;
+    return best;
+  }
+
+  /* One resolution step: what clears, what forges, which specials fire.
+     Forging priority — 5s to pearls, L/T then 2×2 blocks to bursts, straight
+     4s to currents (with the sea's favour: the lucky roll spends the RNG
+     stream exactly as the app does). */
+  function computeClear(runs, squares, swapCells, seedCells, processedInit) {
+    var clear = {}, i, j, k, m;
+    for (i = 0; i < runs.length; i++) {
+      for (j = 0; j < runs[i].cells.length; j++) clear[idx(runs[i].cells[j])] = true;
+    }
+    for (i = 0; i < squares.length; i++) {
+      var sc = squareCells(squares[i]);
+      for (j = 0; j < 4; j++) clear[idx(sc[j])] = true;
+    }
+    if (seedCells) { for (var sk in seedCells) clear[sk] = true; }
+
+    var forged = [], forgedCells = {}, used = {}, spent = {};
+
+    function unmarked(cell) {
+      var ci = idx(cell);
+      return !forgedCells[ci] && clear[ci] && grid[cell.r][cell.c].sp === null;
+    }
+    function inSwap(cell) {
+      if (!swapCells) return false;
+      for (var s = 0; s < swapCells.length; s++) {
+        if (swapCells[s].r === cell.r && swapCells[s].c === cell.c) return true;
+      }
+      return false;
+    }
+    function pickPivotRun(run) {
+      var s;
+      if (swapCells) {
+        for (s = 0; s < run.cells.length; s++) {
+          if (unmarked(run.cells[s]) && inSwap(run.cells[s])) return run.cells[s];
+        }
+      }
+      var mid = run.cells[Math.floor(run.cells.length / 2)];
+      if (unmarked(mid)) return mid;
+      for (s = 0; s < run.cells.length; s++) if (unmarked(run.cells[s])) return run.cells[s];
+      return null;
+    }
+    function pickPivotCells(cells) {
+      var s;
+      if (swapCells) {
+        for (s = 0; s < cells.length; s++) {
+          if (unmarked(cells[s]) && inSwap(cells[s])) return cells[s];
+        }
+      }
+      for (s = 0; s < cells.length; s++) if (unmarked(cells[s])) return cells[s];
+      return null;
+    }
+    function forge(cell, kind, lucky) {
+      forgedCells[idx(cell)] = true;
+      delete clear[idx(cell)];
+      forged.push({ cell: cell, kind: kind, lucky: !!lucky });
+    }
+
+    /* 1) pearls from straight 5s — the five speaks for everything inside it */
+    for (i = 0; i < runs.length; i++) {
+      if (runs[i].len < 5 || used[i]) continue;
+      var p5 = pickPivotRun(runs[i]);
+      if (p5) {
+        forge(p5, "pearl");
+        used[i] = true;
+        for (k = 0; k < runs[i].cells.length; k++) spent[idx(runs[i].cells[k])] = true;
+      }
+    }
+    /* 2) bursts at L/T intersections */
+    for (i = 0; i < runs.length; i++) {
+      if (used[i] || !runs[i].h) continue;
+      for (j = 0; j < runs.length; j++) {
+        if (used[j] || runs[j].h) continue;
+        var hit = null;
+        for (k = 0; k < runs[i].cells.length && !hit; k++) {
+          for (m = 0; m < runs[j].cells.length; m++) {
+            if (runs[j].cells[m].r === runs[i].cells[k].r &&
+                runs[j].cells[m].c === runs[i].cells[k].c) { hit = runs[i].cells[k]; break; }
+          }
+        }
+        if (hit && unmarked(hit)) {
+          forge(hit, "bomb");
+          used[i] = true; used[j] = true;
+          for (k = 0; k < runs[i].cells.length; k++) spent[idx(runs[i].cells[k])] = true;
+          for (k = 0; k < runs[j].cells.length; k++) spent[idx(runs[j].cells[k])] = true;
+          break;
+        }
+      }
+    }
+    /* 3) bursts from 2×2 blocks — one per block, overlapping blocks are the
+       same block, and a block inside a shape that already forged pays nothing */
+    for (i = 0; i < squares.length; i++) {
+      var cells4 = squareCells(squares[i]);
+      var blocked = false;
+      for (k = 0; k < 4; k++) {
+        if (spent[idx(cells4[k])] || forgedCells[idx(cells4[k])]) { blocked = true; break; }
+      }
+      if (blocked) continue;
+      var pv = pickPivotCells(cells4);
+      if (!pv) continue;
+      forge(pv, "bomb");
+      for (k = 0; k < 4; k++) spent[idx(cells4[k])] = true;
+      for (j = 0; j < runs.length; j++) {
+        if (used[j]) continue;
+        for (k = 0; k < runs[j].cells.length; k++) {
+          var inBlock = false;
+          for (m = 0; m < 4; m++) {
+            if (cells4[m].r === runs[j].cells[k].r && cells4[m].c === runs[j].cells[k].c) { inBlock = true; break; }
+          }
+          if (inBlock) { used[j] = true; break; }
+        }
+      }
+    }
+    /* 4) currents from straight 4s — with the sea's favour */
+    for (i = 0; i < runs.length; i++) {
+      if (runs[i].len !== 4 || used[i]) continue;
+      var p4 = pickPivotRun(runs[i]);
+      if (p4) {
+        var lucky = rng() < LUCKY;
+        forge(p4, lucky ? "pearl" : (runs[i].h ? "row" : "col"), lucky);
+        used[i] = true;
+      }
+    }
+
+    /* Activation chain, in row-major order so the same seed plays the same
+       animation every time. */
+    var processed = {};
+    if (processedInit) { for (var pk in processedInit) processed[pk] = true; }
+    var queue = [];
+    var sorted = [];
+    for (var ck in clear) sorted.push(+ck);
+    sorted.sort(function (a, b) { return a - b; });
+    for (i = 0; i < sorted.length; i++) {
+      var c0 = cellAt(sorted[i]);
+      var sp0 = grid[c0.r][c0.c].sp;
+      if (sp0 !== null && !processed[sorted[i]]) {
+        processed[sorted[i]] = true;
+        queue.push({ cell: c0, sp: sp0 });
+      }
+    }
+    var activations = [];
+    function addCell(r, c) {
+      var ci = r * COLS + c;
+      if (forgedCells[ci]) return;
+      if (!clear[ci]) {
+        clear[ci] = true;
+        var sp = grid[r][c].sp;
+        if (sp !== null && !processed[ci]) {
+          processed[ci] = true;
+          queue.push({ cell: { r: r, c: c }, sp: sp });
+        }
+      }
+    }
+    var qi = 0;
+    while (qi < queue.length) {
+      var q = queue[qi]; qi++;
+      activations.push({ cell: q.cell, kind: q.sp });
+      var x, rr, c2;
+      if (q.sp === "row") { for (x = 0; x < COLS; x++) addCell(q.cell.r, x); }
+      else if (q.sp === "col") { for (x = 0; x < ROWS; x++) addCell(x, q.cell.c); }
+      else if (q.sp === "bomb") {
+        for (rr = q.cell.r - 1; rr <= q.cell.r + 1; rr++) {
+          if (rr < 0 || rr >= ROWS) continue;
+          for (c2 = q.cell.c - 1; c2 <= q.cell.c + 1; c2++) {
+            if (c2 < 0 || c2 >= COLS) continue;
+            addCell(rr, c2);
+          }
+        }
+      } else {   /* pearl caught in a clear: claims the most common creature */
+        var mt = mostCommonType();
+        for (rr = 0; rr < ROWS; rr++) {
+          for (c2 = 0; c2 < COLS; c2++) if (grid[rr][c2].t === mt) addCell(rr, c2);
+        }
+      }
+    }
+    return { clear: clear, forged: forged, activations: activations };
+  }
+
+  /* Full loop: clear -> gravity -> refill -> repeat. Points are cells × 10 ×
+     cascade. Refill draws column-major, top-down — same order as the app,
+     same stream. */
+  function resolve(swapCells, seedClear) {
+    var events = [], cascade = 1, points = 0, first = true;
+    while (true) {
+      var runs = findRuns(), squares = findSquares();
+      var seedCells = (first && seedClear) ? seedClear.cells : null;
+      var processedInit = (first && seedClear) ? seedClear.processed : null;
+      first = false;
+      if (!runs.length && !squares.length && !seedCells) break;
+
+      var res = computeClear(runs, squares, cascade === 1 ? swapCells : null,
+                             seedCells, processedInit);
+      var clearList = [];
+      for (var ck in res.clear) clearList.push(+ck);
+      clearList.sort(function (a, b) { return a - b; });
+      if (!clearList.length) break;
+
+      var gained = clearList.length * 10 * cascade;
+      points += gained;
+      var clearCells = [];
+      for (var i = 0; i < clearList.length; i++) clearCells.push(cellAt(clearList[i]));
+      events.push({ kind: "clear", cells: clearCells, forged: res.forged,
+                    activations: res.activations, cascade: cascade, points: gained });
+
+      for (i = 0; i < res.forged.length; i++) {
+        var f = res.forged[i];
+        if (f.kind === "pearl") grid[f.cell.r][f.cell.c] = { t: -1, sp: "pearl" };
+        else grid[f.cell.r][f.cell.c].sp = f.kind;
+      }
+
+      var scratch = [], r, c;
+      for (r = 0; r < ROWS; r++) scratch.push(grid[r].slice());
+      for (i = 0; i < clearList.length; i++) {
+        var cc = cellAt(clearList[i]);
+        scratch[cc.r][cc.c] = null;
+      }
+      var falls = [];
+      for (c = 0; c < COLS; c++) {
+        var write = ROWS - 1;
+        for (r = ROWS - 1; r >= 0; r--) {
+          if (scratch[r][c] === null) continue;
+          if (write !== r) {
+            scratch[write][c] = scratch[r][c];
+            scratch[r][c] = null;
+            falls.push({ from: { r: r, c: c }, to: { r: write, c: c } });
+          }
+          write--;
+        }
+      }
+      var spawns = [];
+      for (c = 0; c < COLS; c++) {
+        for (r = 0; r < ROWS; r++) {
+          if (scratch[r][c] === null) {
+            var t = randType();
+            scratch[r][c] = { t: t, sp: null };
+            spawns.push({ cell: { r: r, c: c }, t: t });
+          }
+        }
+      }
+      grid = scratch;
+      events.push({ kind: "fall", moves: falls });
+      events.push({ kind: "spawn", spawns: spawns });
+      cascade++;
+    }
+    if (!findValidMove()) {
+      doReshuffle();
+      events.push({ kind: "shuffle" });
+    }
+    return { events: events, points: points, cascades: cascade - 1 };
+  }
+
+  function swapPieces(a, b) {
+    var tmp = grid[a.r][a.c];
+    grid[a.r][a.c] = grid[b.r][b.c];
+    grid[b.r][b.c] = tmp;
+  }
+
+  /* What two specials make of each other. Deliberately absent from the rules. */
+  function comboKind(a, b) {
+    if (a === "pearl" && b === "pearl") return "pearlStorm";
+    if ((a === "pearl" && b === "bomb") || (a === "bomb" && b === "pearl")) return "seaQuake";
+    if (a === "pearl" || b === "pearl") return "undertow";
+    if (a === "bomb" && b === "bomb") return "maelstrom";
+    if (a === "bomb" || b === "bomb") return "tsunami";
+    return "riptide";
+  }
+
+  function performCombo(combo, a, b, A, B) {
+    var cells = {}, processed = {}, r, c, res;
+    if (combo === "pearlStorm") {
+      /* the whole pool empties; other specials don't chain-fire — and this is
+         the one combo that never performs the swap */
+      for (r = 0; r < ROWS; r++) {
+        for (c = 0; c < COLS; c++) {
+          cells[r * COLS + c] = true;
+          if (grid[r][c].sp !== null) processed[r * COLS + c] = true;
+        }
+      }
+      res = resolve(null, { cells: cells, processed: processed });
+      return { valid: true, events: res.events, points: res.points,
+               cascades: res.cascades, combo: combo };
+    }
+
+    swapPieces(a, b);
+    cells[idx(a)] = true; cells[idx(b)] = true;
+    processed[idx(a)] = true; processed[idx(b)] = true;
+
+    if (combo === "riptide") {
+      for (c = 0; c < COLS; c++) cells[b.r * COLS + c] = true;
+      for (r = 0; r < ROWS; r++) cells[r * COLS + b.c] = true;
+    } else if (combo === "tsunami") {
+      var current = A.sp === "bomb" ? B.sp : A.sp;
+      if (current === "row") {
+        for (r = Math.max(0, b.r - 1); r <= Math.min(ROWS - 1, b.r + 1); r++) {
+          for (c = 0; c < COLS; c++) cells[r * COLS + c] = true;
+        }
+      } else {
+        for (c = Math.max(0, b.c - 1); c <= Math.min(COLS - 1, b.c + 1); c++) {
+          for (r = 0; r < ROWS; r++) cells[r * COLS + c] = true;
+        }
+      }
+    } else if (combo === "maelstrom") {
+      for (r = Math.max(0, b.r - 2); r <= Math.min(ROWS - 1, b.r + 2); r++) {
+        for (c = Math.max(0, b.c - 2); c <= Math.min(COLS - 1, b.c + 2); c++) {
+          cells[r * COLS + c] = true;
+        }
+      }
+    } else {   /* undertow, seaQuake: every glyph of the partner's kind becomes
+                  a special and they all fire, through the ordinary chain */
+      var partner = A.sp === "pearl" ? B : A;
+      var pearlAt = A.sp === "pearl" ? b : a;
+      processed = {}; processed[idx(pearlAt)] = true;
+      cells = {}; cells[idx(pearlAt)] = true;
+      var flip = partner.sp === "col";
+      for (r = 0; r < ROWS; r++) {
+        for (c = 0; c < COLS; c++) {
+          if (grid[r][c].t === partner.t) {
+            if (grid[r][c].sp === null) {
+              grid[r][c].sp = combo === "seaQuake" ? "bomb" : (flip ? "col" : "row");
+              flip = !flip;
+            }
+            cells[r * COLS + c] = true;
+          }
+        }
+      }
+    }
+    res = resolve(null, { cells: cells, processed: processed });
+    return { valid: true, events: res.events, points: res.points,
+             cascades: res.cascades, combo: combo };
+  }
+
+  function trySwap(a, b) {
+    if (Math.abs(a.r - b.r) + Math.abs(a.c - b.c) !== 1) return null;
+    var A = grid[a.r][a.c], B = grid[b.r][b.c];
+
+    /* two specials together are always a move, line or no line */
+    if (A.sp !== null && B.sp !== null) return performCombo(comboKind(A.sp, B.sp), a, b, A, B);
+
+    if (A.sp === "pearl" || B.sp === "pearl") {
+      var aP = A.sp === "pearl";
+      swapPieces(a, b);
+      var pearlAt = aP ? b : a;
+      var targetType = aP ? B.t : A.t;
+      var cells = {};
+      cells[idx(pearlAt)] = true;
+      for (var r = 0; r < ROWS; r++) {
+        for (var c = 0; c < COLS; c++) {
+          if (grid[r][c].t === targetType) cells[r * COLS + c] = true;
+        }
+      }
+      var processed = {};
+      processed[idx(pearlAt)] = true;
+      var res = resolve([a, b], { cells: cells, processed: processed });
+      return { valid: true, events: res.events, points: res.points,
+               cascades: res.cascades, combo: null };
+    }
+
+    swapPieces(a, b);
+    if (!hasMatch()) {
+      swapPieces(a, b);
+      return { valid: false, events: [], points: 0, cascades: 0, combo: null };
+    }
+    var res2 = resolve([a, b], null);
+    return { valid: true, events: res2.events, points: res2.points,
+             cascades: res2.cascades, combo: null };
+  }
+
+  /* A pearl next to anything is always a legal move; so are two specials side
+     by side; otherwise scan swaps. */
+  function findValidMove() {
+    var r, c, d;
+    var dirs4 = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+    for (r = 0; r < ROWS; r++) {
+      for (c = 0; c < COLS; c++) {
+        if (grid[r][c].sp !== "pearl") continue;
+        for (d = 0; d < 4; d++) {
+          var r2 = r + dirs4[d][0], c2 = c + dirs4[d][1];
+          if (r2 >= 0 && r2 < ROWS && c2 >= 0 && c2 < COLS) {
+            return [{ r: r, c: c }, { r: r2, c: c2 }];
+          }
+        }
+      }
+    }
+    var dirs2 = [[0, 1], [1, 0]];
+    for (r = 0; r < ROWS; r++) {
+      for (c = 0; c < COLS; c++) {
+        for (d = 0; d < 2; d++) {
+          var rr = r + dirs2[d][0], cc = c + dirs2[d][1];
+          if (rr >= ROWS || cc >= COLS) continue;
+          var a = { r: r, c: c }, b = { r: rr, c: cc };
+          if (grid[r][c].sp !== null && grid[rr][cc].sp !== null) return [a, b];
+          swapPieces(a, b);
+          var ok = hasMatch();
+          swapPieces(a, b);
+          if (ok) return [a, b];
+        }
+      }
+    }
+    return null;
+  }
+
+  /* Deadlock: redeal the same pieces until the board is match-free and
+     playable. Fisher–Yates with the engine RNG. */
+  function doReshuffle() {
+    var pieces = [], r, c, i, attempt;
+    for (r = 0; r < ROWS; r++) { for (c = 0; c < COLS; c++) pieces.push(grid[r][c]); }
+    for (attempt = 0; attempt < 300; attempt++) {
+      for (i = pieces.length - 1; i > 0; i--) {
+        var j = Math.floor(rng() * (i + 1));
+        var tmp = pieces[i]; pieces[i] = pieces[j]; pieces[j] = tmp;
+      }
+      var k = 0;
+      for (r = 0; r < ROWS; r++) { for (c = 0; c < COLS; c++) grid[r][c] = pieces[k++]; }
+      if (!hasMatch() && findValidMove()) return;
+    }
+    for (r = 0; r < ROWS; r++) {
+      for (c = 0; c < COLS; c++) grid[r][c] = { t: randType(), sp: null };
+    }
+    if (hasMatch() || !findValidMove()) fillInitial();
+  }
+  /*ENGINE-END*/
+
+  /* ================================================================= VIEW */
+  var svg = document.getElementById("board");
+  if (!svg) return;
+  var stage = document.getElementById("stage");
+  var piecesLayer = document.getElementById("pieces");
+  var selring = document.getElementById("selring");
+  var cursorEl = document.getElementById("cursor");
+  var countEl = document.getElementById("count");
+  var bannerEl = document.getElementById("banner");
+  var sayEl = document.getElementById("say");
+  var replay = document.getElementById("replay");
+
+  var CS = 100, GS = 3.1;   /* cell size in board units, glyph scale (24 → ~74) */
+  var COMBO_NAMES = { riptide: "Riptide!", tsunami: "Tsunami!", maelstrom: "Maelstrom!",
+                      undertow: "Undertow!", seaQuake: "Sea Quake!", pearlStorm: "Pearl Storm!" };
+  var SVGNS = "http://www.w3.org/2000/svg";
+  var reducedMotion = window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var view;             /* view[r][c] = { el, t, sp, x, y } or null */
+  var score, movesLeft, over, busy, sel, cur, curShown;
+
+  function el(name, attrs) {
+    var n = document.createElementNS(SVGNS, name);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    return n;
+  }
+  function ctrX(c) { return c * CS + CS / 2; }
+  function ctrY(r) { return r * CS + CS / 2; }
+  function setT(p, s) {
+    p.el.setAttribute("transform",
+      "translate(" + p.x + " " + p.y + ") scale(" + (GS * s) + ")");
+  }
+
+  /* No CSS transitions and no transform-origin on SVG transforms — the full
+     string is written per frame instead, which sidesteps every WebKit quirk
+     in one decision. */
+  function tween(dur, fn, done) {
+    if (reducedMotion) dur = 0;
+    var t0 = null;
+    function frame(ts) {
+      if (t0 === null) t0 = ts;
+      var k = dur > 0 ? Math.min(1, (ts - t0) / dur) : 1;
+      fn(k);
+      if (k < 1) requestAnimationFrame(frame);
+      else if (done) done();
+    }
+    requestAnimationFrame(frame);
+  }
+  function easeOut(k) { return 1 - (1 - k) * (1 - k); }
+  function easeIn(k) { return k * k; }
+
+  function makePieceEl(t, sp) {
+    var g = el("g", { "class": "piece" });
+    if (sp === "pearl") {
+      g.appendChild(el("circle", { r: "12.4", fill: "url(#pearlGlow)" }));
+      g.appendChild(el("circle", { r: "10.2", fill: "url(#nacre)" }));
+      g.appendChild(el("circle", { cx: "-3.4", cy: "-4.4", r: "4.3", fill: "url(#pearlHi)" }));
+      return g;
+    }
+    var u = el("use", { x: "-12", y: "-12" });
+    u.setAttribute("href", "#g" + t);
+    u.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", "#g" + t);
+    g.appendChild(u);
+    if (sp === "row" || sp === "col") {
+      var ov = el("g", sp === "col" ? { transform: "rotate(90)" } : {});
+      ov.appendChild(el("path", { d: "M-7.6 -3.8H7.6M-7.6 3.8H7.6", fill: "none",
+        stroke: "rgba(15,23,28,.55)", "stroke-width": "2.7", "stroke-linecap": "round" }));
+      ov.appendChild(el("path", { d: "M-7.6 -3.8H7.6M-7.6 3.8H7.6", fill: "none",
+        stroke: "rgba(230,243,255,.92)", "stroke-width": "1.5", "stroke-linecap": "round",
+        "stroke-dasharray": "3.2 2.4" }));
+      g.appendChild(ov);
+    } else if (sp === "bomb") {
+      g.appendChild(el("circle", { r: "8.8", fill: "none",
+        stroke: "rgba(15,23,28,.55)", "stroke-width": "2.7" }));
+      g.appendChild(el("circle", { r: "8.8", fill: "none",
+        stroke: "rgba(230,243,255,.92)", "stroke-width": "1.5",
+        "stroke-dasharray": "2.6 2" }));
+    }
+    return g;
+  }
+
+  function addPiece(r, c, t, sp) {
+    var p = { el: makePieceEl(t, sp), t: t, sp: sp, x: ctrX(c), y: ctrY(r) };
+    setT(p, 1);
+    piecesLayer.appendChild(p.el);
+    view[r][c] = p;
+    return p;
+  }
+
+  function rebuildAll() {
+    while (piecesLayer.firstChild) piecesLayer.removeChild(piecesLayer.firstChild);
+    view = [];
+    for (var r = 0; r < ROWS; r++) {
+      view.push([]);
+      for (var c = 0; c < COLS; c++) {
+        view[r].push(null);
+        addPiece(r, c, grid[r][c].t, grid[r][c].sp);
+      }
+    }
+  }
+
+  /* Haptics are for fingers — only buzz once a real touch has happened. */
+  var touchMode = false;
+  function buzz(ms) {
+    if (!touchMode || !navigator.vibrate) return;
+    try { navigator.vibrate(ms); } catch (e) {}
+  }
+
+  var bannerT = 0;
+  function flashBanner(msg) {
+    bannerEl.textContent = msg;
+    bannerEl.classList.add("show");
+    clearTimeout(bannerT);
+    bannerT = setTimeout(function () { bannerEl.classList.remove("show"); }, 2200);
+  }
+  function holdBanner(msg) {
+    clearTimeout(bannerT);
+    bannerEl.textContent = msg;
+    bannerEl.classList.add("show");
+  }
+
+  function updateReadout() {
+    countEl.textContent = score + " / " + LEVEL.target + " · " +
+      movesLeft + (movesLeft === 1 ? " move" : " moves");
+  }
+  function announce() {
+    sayEl.textContent = score + " of " + LEVEL.target + " points, " +
+      movesLeft + (movesLeft === 1 ? " move" : " moves") + " left.";
+  }
+
+  /* ------------------------------------------------------------- playback */
+  function playEvents(events, done) {
+    var i = 0;
+    function next() {
+      if (i >= events.length) { done(); return; }
+      var ev = events[i++];
+      if (ev.kind === "clear") playClear(ev, next);
+      else if (ev.kind === "fall") playFall(ev, next);
+      else if (ev.kind === "spawn") playSpawn(ev, next);
+      else playShuffle(next);
+    }
+    next();
+  }
+
+  function playClear(ev, done) {
+    var gone = [], i;
+    for (i = 0; i < ev.cells.length; i++) {
+      var p = view[ev.cells[i].r][ev.cells[i].c];
+      if (p) gone.push(p);
+      view[ev.cells[i].r][ev.cells[i].c] = null;
+    }
+    if (ev.cascade > 1) flashBanner("Cascade ×" + ev.cascade);
+    score += ev.points;
+    updateReadout();
+    buzz(ev.cascade > 1 ? 12 : 6);
+    tween(190, function (k) {
+      var s = 1 - easeOut(k);
+      for (var j = 0; j < gone.length; j++) {
+        setT(gone[j], s);
+        gone[j].el.setAttribute("opacity", 1 - k);
+      }
+    }, function () {
+      for (var j = 0; j < gone.length; j++) {
+        if (gone[j].el.parentNode) piecesLayer.removeChild(gone[j].el);
+      }
+      if (!ev.forged.length) { done(); return; }
+      /* forge pops: the pivot piece becomes its mark */
+      var born = [];
+      for (var f = 0; f < ev.forged.length; f++) {
+        var fg = ev.forged[f];
+        var old = view[fg.cell.r][fg.cell.c];
+        var t = fg.kind === "pearl" ? -1 : (old ? old.t : 0);
+        if (old && old.el.parentNode) piecesLayer.removeChild(old.el);
+        view[fg.cell.r][fg.cell.c] = null;
+        born.push(addPiece(fg.cell.r, fg.cell.c, t, fg.kind));
+        if (fg.lucky) flashBanner("The sea's favour — a pearl");
+      }
+      buzz(14);
+      tween(150, function (k) {
+        var s = easeOut(k);
+        for (var j = 0; j < born.length; j++) setT(born[j], s);
+      }, done);
+    });
+  }
+
+  function playFall(ev, done) {
+    if (!ev.moves.length) { done(); return; }
+    var movers = [], i;
+    for (i = 0; i < ev.moves.length; i++) {
+      var m = ev.moves[i];
+      var p = view[m.from.r][m.from.c];
+      view[m.from.r][m.from.c] = null;
+      movers.push({ p: p, y0: p.y, y1: ctrY(m.to.r), to: m.to });
+    }
+    for (i = 0; i < movers.length; i++) view[movers[i].to.r][movers[i].to.c] = movers[i].p;
+    tween(200, function (k) {
+      var e = easeIn(k);
+      for (var j = 0; j < movers.length; j++) {
+        movers[j].p.y = movers[j].y0 + (movers[j].y1 - movers[j].y0) * e;
+        setT(movers[j].p, 1);
+      }
+    }, function () {
+      for (var j = 0; j < movers.length; j++) { movers[j].p.y = movers[j].y1; setT(movers[j].p, 1); }
+      done();
+    });
+  }
+
+  function playSpawn(ev, done) {
+    if (!ev.spawns.length) { done(); return; }
+    /* new pieces drop in from above the top edge; content outside the viewBox
+       is clipped by the SVG itself, no clipPath needed */
+    var colCount = {}, movers = [], i;
+    for (i = 0; i < ev.spawns.length; i++) {
+      var c = ev.spawns[i].cell.c;
+      colCount[c] = (colCount[c] || 0) + 1;
+    }
+    for (i = 0; i < ev.spawns.length; i++) {
+      var s = ev.spawns[i];
+      var p = addPiece(s.cell.r, s.cell.c, s.t, null);
+      var y1 = ctrY(s.cell.r);
+      p.y = ctrY(s.cell.r - colCount[s.cell.c]);
+      setT(p, 1);
+      movers.push({ p: p, y0: p.y, y1: y1 });
+    }
+    tween(220, function (k) {
+      var e = easeIn(k);
+      for (var j = 0; j < movers.length; j++) {
+        movers[j].p.y = movers[j].y0 + (movers[j].y1 - movers[j].y0) * e;
+        setT(movers[j].p, 1);
+      }
+    }, function () {
+      for (var j = 0; j < movers.length; j++) { movers[j].p.y = movers[j].y1; setT(movers[j].p, 1); }
+      done();
+    });
+  }
+
+  function playShuffle(done) {
+    flashBanner("The tide re-dealt itself");
+    tween(220, function (k) {
+      piecesLayer.setAttribute("opacity", 1 - k);
+    }, function () {
+      rebuildAll();
+      tween(220, function (k) {
+        piecesLayer.setAttribute("opacity", k);
+      }, function () {
+        piecesLayer.removeAttribute("opacity");
+        done();
+      });
+    });
+  }
+
+  /* --------------------------------------------------------------- swaps */
+  function attemptSwap(a, b) {
+    if (busy || over) return;
+    var res = trySwap(a, b);
+    if (res === null) return;
+    clearSelection();
+    hideCursor();
+    busy = true;
+    var pa = view[a.r][a.c], pb = view[b.r][b.c];
+    var ax = pa.x, ay = pa.y, bx = pb.x, by = pb.y;
+    buzz(6);
+    tween(150, function (k) {
+      var e = easeOut(k);
+      pa.x = ax + (bx - ax) * e; pa.y = ay + (by - ay) * e; setT(pa, 1);
+      pb.x = bx + (ax - bx) * e; pb.y = by + (ay - by) * e; setT(pb, 1);
+    }, function () {
+      if (!res.valid) {
+        buzz(24);
+        tween(150, function (k) {
+          var e = easeOut(k);
+          pa.x = bx + (ax - bx) * e; pa.y = by + (ay - by) * e; setT(pa, 1);
+          pb.x = ax + (bx - ax) * e; pb.y = ay + (by - ay) * e; setT(pb, 1);
+        }, function () { busy = false; });
+        return;
+      }
+      view[a.r][a.c] = pb; view[b.r][b.c] = pa;
+      movesLeft--;
+      updateReadout();
+      if (res.combo) flashBanner(COMBO_NAMES[res.combo]);
+      playEvents(res.events, function () {
+        busy = false;
+        announce();
+        checkEnd();
+      });
+    });
+  }
+
+  function checkEnd() {
+    if (score >= LEVEL.target) {
+      over = true;
+      stage.classList.add("over");
+      holdBanner("Level 1, cleared. 999 more below.");
+      sayEl.textContent = "Cleared! " + score + " points. In the app, 999 levels wait below.";
+      buzz(40);
+    } else if (movesLeft <= 0) {
+      over = true;
+      stage.classList.add("over");
+      holdBanner("The tide went out.");
+      sayEl.textContent = "Out of moves at " + score + " points. Play it again?";
+    }
+  }
+
+  /* --------------------------------------------------------------- input */
+  function setSelection(cell) {
+    sel = cell;
+    selring.setAttribute("x", cell.c * CS + 4);
+    selring.setAttribute("y", cell.r * CS + 4);
+    selring.removeAttribute("display");
+    buzz(4);
+  }
+  function clearSelection() {
+    sel = null;
+    selring.setAttribute("display", "none");
+  }
+  function hideCursor() {
+    curShown = false;
+    cursorEl.setAttribute("display", "none");
+  }
+  function showCursor() {
+    curShown = true;
+    cursorEl.setAttribute("x", cur.c * CS + 4);
+    cursorEl.setAttribute("y", cur.r * CS + 4);
+    cursorEl.removeAttribute("display");
+  }
+
+  function tapCell(cell) {
+    if (busy || over) return;
+    if (sel && sel.r === cell.r && sel.c === cell.c) { clearSelection(); return; }
+    if (sel && Math.abs(sel.r - cell.r) + Math.abs(sel.c - cell.c) === 1) {
+      attemptSwap(sel, cell);
+      return;
+    }
+    setSelection(cell);
+  }
+
+  function toBoard(clientX, clientY) {
+    var r = svg.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return { x: (clientX - r.left) / r.width * (COLS * CS),
+             y: (clientY - r.top) / r.height * (ROWS * CS) };
+  }
+  function cellAtXY(x, y) {
+    var c = Math.floor(x / CS), r = Math.floor(y / CS);
+    if (r < 0 || c < 0 || r >= ROWS || c >= COLS) return null;
+    return { r: r, c: c };
+  }
+
+  var press = null;   /* { cell, x, y, dragged } */
+  function beginPress(clientX, clientY) {
+    if (busy || over) return;
+    var p = toBoard(clientX, clientY);
+    if (!p) return;
+    var cell = cellAtXY(p.x, p.y);
+    if (!cell) return;
+    press = { cell: cell, x: p.x, y: p.y, dragged: false };
+  }
+  /* Drag-swap: 35 board units toward a neighbour commits the swap. */
+  function movePress(clientX, clientY) {
+    if (!press || press.dragged || busy || over) return;
+    var p = toBoard(clientX, clientY);
+    if (!p) return;
+    var dx = p.x - press.x, dy = p.y - press.y;
+    if (Math.abs(dx) < 35 && Math.abs(dy) < 35) return;
+    var b;
+    if (Math.abs(dx) > Math.abs(dy)) b = { r: press.cell.r, c: press.cell.c + (dx > 0 ? 1 : -1) };
+    else b = { r: press.cell.r + (dy > 0 ? 1 : -1), c: press.cell.c };
+    press.dragged = true;
+    if (b.r < 0 || b.r >= ROWS || b.c < 0 || b.c >= COLS) return;
+    clearSelection();
+    attemptSwap(press.cell, b);
+  }
+  function endPress() {
+    if (press && !press.dragged) tapCell(press.cell);
+    press = null;
+  }
+
+  /* Touch and pointer are wired separately on purpose: iOS Safari does not
+     reliably honour touch-action:none on an SVG, so it withholds pointermove
+     while it decides whether the gesture is a page pan — and if it decides
+     yes, the stroke dies in a pointercancel. Native touch handlers with
+     preventDefault() settle it on the first pixel; pointer events still
+     drive mouse and pen. lastTouchAt suppresses the compatibility mouse
+     events a browser synthesises just after a touch. */
+  var lastTouchAt = 0;
+  svg.addEventListener("touchstart", function (e) {
+    lastTouchAt = Date.now();
+    if (e.isTrusted) touchMode = true;
+    var t = e.changedTouches[0];
+    beginPress(t.clientX, t.clientY);
+    if (press && !over) e.preventDefault();
+  }, { passive: false });
+
+  svg.addEventListener("touchmove", function (e) {
+    lastTouchAt = Date.now();
+    if (!press) return;
+    var t = e.changedTouches[0];
+    movePress(t.clientX, t.clientY);
+    e.preventDefault();
+  }, { passive: false });
+
+  svg.addEventListener("touchend", function () { lastTouchAt = Date.now(); endPress(); });
+  svg.addEventListener("touchcancel", function () { lastTouchAt = Date.now(); press = null; });
+
+  function fromTouch(e) {
+    return e.pointerType === "touch" || Date.now() - lastTouchAt < 600;
+  }
+  svg.addEventListener("pointerdown", function (e) {
+    if (fromTouch(e)) return;
+    try { svg.setPointerCapture(e.pointerId); } catch (err) {}
+    beginPress(e.clientX, e.clientY);
+    e.preventDefault();
+  });
+  svg.addEventListener("pointermove", function (e) {
+    if (fromTouch(e)) return;
+    movePress(e.clientX, e.clientY);
+  });
+  svg.addEventListener("pointerup", function (e) {
+    if (fromTouch(e)) return;
+    endPress();
+  });
+  svg.addEventListener("pointercancel", function () { press = null; });
+  window.addEventListener("blur", function () { press = null; });
+
+  /* Keyboard / VoiceOver: arrows walk a cursor, Enter or Space picks a
+     creature up, the next arrow swaps it that way. */
+  var KEYS = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+  svg.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" || e.key === " ") {
+      if (over) { reset(); }
+      else if (!curShown) { showCursor(); }
+      else if (sel && sel.r === cur.r && sel.c === cur.c) { clearSelection(); }
+      else { tapCell({ r: cur.r, c: cur.c }); }
+      e.preventDefault();
+      return;
+    }
+    var d = KEYS[e.key];
+    if (!d || busy || over) return;
+    if (sel && sel.r === cur.r && sel.c === cur.c) {
+      var b = { r: sel.r + d[0], c: sel.c + d[1] };
+      if (b.r >= 0 && b.r < ROWS && b.c >= 0 && b.c < COLS) attemptSwap(sel, b);
+      e.preventDefault();
+      return;
+    }
+    cur = { r: Math.max(0, Math.min(ROWS - 1, cur.r + d[0])),
+            c: Math.max(0, Math.min(COLS - 1, cur.c + d[1])) };
+    showCursor();
+    e.preventDefault();
+  });
+
+  replay.addEventListener("click", function () { reset(); svg.focus(); });
+
+  function reset() {
+    rng = mulberry32(LEVEL.seed);
+    fillInitial();
+    score = 0; movesLeft = LEVEL.moves;
+    over = false; busy = false; sel = null; press = null;
+    cur = { r: 2, c: 2 }; curShown = false;
+    stage.classList.remove("over");
+    clearSelection();
+    hideCursor();
+    clearTimeout(bannerT);
+    bannerEl.classList.remove("show");
+    rebuildAll();
+    updateReadout();
+    sayEl.textContent = "";
+  }
+
+  reset();
+})();
+</script>
+</body>
+</html>
